@@ -205,9 +205,18 @@ L2SqrSIMD4ExtResiduals(const void *pVect1v, const void *pVect2v, const void *qty
 }
 #endif
 
+
+/**
+ * @brief 计算距离（浮点数），欧氏距离的平方（优化掉了平方根）
+ * 
+ * @note 公式为 dist = (x1-y1)^2 + (x2-y2)^2 + ... + (xn-yn)^2
+ */
 class L2Space : public SpaceInterface<float> {
+    // 计算距离的函数
     DISTFUNC<float> fstdistfunc_;
+    // 单个向量的字节数
     size_t data_size_;
+    // 向量的维度
     size_t dim_;
 
  public:
@@ -237,14 +246,17 @@ class L2Space : public SpaceInterface<float> {
         data_size_ = dim * sizeof(float);
     }
 
+    // 向量所占的内存大小
     size_t get_data_size() {
         return data_size_;
     }
 
+    // 向量距离计算函数
     DISTFUNC<float> get_dist_func() {
         return fstdistfunc_;
     }
 
+    // 取得维度值得地址？干啥用？
     void *get_dist_func_param() {
         return &dim_;
     }
@@ -291,6 +303,10 @@ static int L2SqrI(const void* __restrict pVect1, const void* __restrict pVect2, 
     return (res);
 }
 
+/**
+ * @brief 计算距离（整数），欧式距离的平方（优化掉了平方根计算）
+ * 
+ */
 class L2SpaceI : public SpaceInterface<int> {
     DISTFUNC<int> fstdistfunc_;
     size_t data_size_;
