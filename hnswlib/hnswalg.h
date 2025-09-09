@@ -17,64 +17,114 @@ typedef unsigned int linklistsizeint;
 template<typename dist_t>
 class HierarchicalNSW : public AlgorithmInterface<dist_t> {
  public:
+    // 标签锁分桶数量
     static const tableint MAX_LABEL_OPERATION_LOCKS = 65536;
+    // 删除标记 比特位
     static const unsigned char DELETE_MARK = 0x01;
 
+    // 最大元素数量
     size_t max_elements_{0};
+    // 当前元素数量
     mutable std::atomic<size_t> cur_element_count{0};  // current number of elements
+    // 每个节点所占内存大小，为邻居列表大小+向量大小+标签大小
     size_t size_data_per_element_{0};
+    // 每个节点的邻居列表所占内存大小，为邻居数量*邻居节点id大小+列表长度大小
     size_t size_links_per_element_{0};
+    // 删除元素数量
     mutable std::atomic<size_t> num_deleted_{0};  // number of deleted elements
+    // 构建时配置参数：每个节点的邻居数量
     size_t M_{0};
+    // M的最大值，目前与M_相同
     size_t maxM_{0};
+    // 零层的每个节点的邻居数量，目前为2倍M_
     size_t maxM0_{0};
+    // 构建时配置参数：新增节点时，搜索的节点数量，为 ef_con与M中的最大值
     size_t ef_construction_{0};
+    // 搜索时配置参数：搜索的节点数量
     size_t ef_{ 0 };
 
+    // 节点层级分布的放缩参数，及其倒数
     double mult_{0.0}, revSize_{0.0};
+    // 记录层数的最大值
     int maxlevel_{0};
 
+    // 访问记录列表池，用于多线程环境下，每个线程都有自己的访问记录列表 TODO目前默认构建只有一个，可能会造成多线程搜索的串行
     std::unique_ptr<VisitedListPool> visited_list_pool_{nullptr};
 
+    // 标签锁分桶的存储
     // Locks operations with element by label value
     mutable std::vector<std::mutex> label_op_locks_;
 
+    // 索引锁
     std::mutex global;
+    // linklist锁，数量=最大元素数量
     std::vector<std::mutex> link_list_locks_;
 
+    // 入口节点的内部id
     tableint enterpoint_node_{0};
 
+    // 零层邻居列表的大小，应为邻居数量加一，其数值 = 邻居数量 * sizeof(节点id) + sizeof(列表size)
     size_t size_links_level0_{0};
+    // 零层节点数据的数据偏移量 无用偏移量（0） 零层节点数据的label偏移量 
     size_t offsetData_{0}, offsetLevel0_{0}, label_offset_{ 0 };
 
+    // 零层数据的存储空间地址
     char *data_level0_memory_{nullptr};
+    // 为每个节点记录在每个层级上的邻居信息
     char **linkLists_{nullptr};
+    // 为每个元素记录level信息
     std::vector<int> element_levels_;  // keeps level of each element
 
+    // data所占的内存大小
     size_t data_size_{0};
 
+    // 向量距离计算函数
     DISTFUNC<dist_t> fstdistfunc_;
+    // 向量距离计算函数的参数
     void *dist_func_param_{nullptr};
 
+    // 标签与内部id的映射的锁
     mutable std::mutex label_lookup_lock;  // lock for label_lookup_
+    // 用于存储标签和内部id的映射关系
     std::unordered_map<labeltype, tableint> label_lookup_;
 
+    // 用于为level生成随机数的引擎
     std::default_random_engine level_generator_;
+    // 用于为更新操作生成随机数的引擎
     std::default_random_engine update_probability_generator_;
 
+    // 统计距离计算次数
     mutable std::atomic<long> metric_distance_computations{0};
+    // 统计搜索过程中的跳数（访问节点数）
     mutable std::atomic<long> metric_hops{0};
 
+    // 是否允许替换被删除的元素
     bool allow_replace_deleted_ = false;  // flag to replace deleted elements (marked as deleted) during insertions
 
+    // 存储删除元素集合的锁
     std::mutex deleted_elements_lock;  // lock for deleted_elements
+    // 记录被删除元素的内部id
     std::unordered_set<tableint> deleted_elements;  // contains internal ids of deleted elements
 
 
+    /**
+     * @brief 默认构造函数
+     * 
+     * @param s 
+     */
     HierarchicalNSW(SpaceInterface<dist_t> *s) {
     }
 
 
+    /**
+     * @brief 从文件加载索引
+     * 
+     * @param s 向量距离计算函数
+     * @param location 文件位置
+     * @param nmslib 
+     * @param max_elements 最大元素数量
+     * @param allow_replace_deleted 
+     */
     HierarchicalNSW(
         SpaceInterface<dist_t> *s,
         const std::string &location,
@@ -86,6 +136,16 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
 
+    /**
+     * @brief 创建空索引
+     * 
+     * @param s 向量距离计算函数
+     * @param max_elements  最大元素数量
+     * @param M 构建图时候每个节点联通的数量
+     * @param ef_construction 插入节点时，搜索的节点数量
+     * @param random_seed 
+     * @param allow_replace_deleted 
+     */
     HierarchicalNSW(
         SpaceInterface<dist_t> *s,
         size_t max_elements,
@@ -162,6 +222,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
 
+    /**
+     * @brief 指定排序规则，用于排序时首位小的排在前面，用于优先队列时，首位大的排在顶端
+     * 
+     */
     struct CompareByFirst {
         constexpr bool operator()(std::pair<dist_t, tableint> const& a,
             std::pair<dist_t, tableint> const& b) const noexcept {
@@ -175,6 +239,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
 
+    /**
+     * @brief 获取标签对应的锁
+     * 
+     * @param label 
+     * @return std::mutex& 
+     */
     inline std::mutex& getLabelOpMutex(labeltype label) const {
         // calculate hash
         size_t lock_id = label & (MAX_LABEL_OPERATION_LOCKS - 1);
@@ -194,16 +264,34 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
 
+    /**
+     * @brief 获取内部id对应的标签
+     * 
+     * @param internal_id 
+     * @return labeltype* 
+     */
     inline labeltype *getExternalLabeLp(tableint internal_id) const {
         return (labeltype *) (data_level0_memory_ + internal_id * size_data_per_element_ + label_offset_);
     }
 
 
+    /**
+     * @brief 获取指定内部id对应的数据指针
+     * 
+     * @param internal_id 指定内部id
+     * @return char* 
+     */
     inline char *getDataByInternalId(tableint internal_id) const {
         return (data_level0_memory_ + internal_id * size_data_per_element_ + offsetData_);
     }
 
 
+    /**
+     * @brief 获取随机的层数
+     * 
+     * @param reverse_size 缩放大小（最大层数）
+     * @return int 
+     */
     int getRandomLevel(double reverse_size) {
         std::uniform_real_distribution<double> distribution(0.0, 1.0);
         double r = -log(distribution(level_generator_)) * reverse_size;
@@ -222,6 +310,15 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         return num_deleted_;
     }
 
+    /**
+     * @brief 基于特定层级，以指定点为入口，搜索出距离data点最近的k个点
+     * 
+     * @param ep_id 入口节点
+     * @param data_point 搜索目标点
+     * @param layer 指定搜索的层级
+     * @return std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> 
+     * @note 指定的入口节点需要保证在指定层上存在
+     */
     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>
     searchBaseLayer(tableint ep_id, const void *data_point, int layer) {
         VisitedList *vl = visited_list_pool_->getFreeVisitedList();
@@ -232,6 +329,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidateSet;
 
         dist_t lowerBound;
+        // 若入口节点Y没被删除，计算入口节点Y到更新节点X的距离，以其作为距离下限，以距离加入top集合，以负距离加入候选集
+        // 若入口节点Y被删除，则用无限大做为距离，以其作为距离下限，以负距离加入候选集
+        // 最后记录入口节点Y已访问
         if (!isMarkedDeleted(ep_id)) {
             dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             top_candidates.emplace(dist, ep_id);
@@ -250,10 +350,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
             candidateSet.pop();
 
+            // 取候选集中的top，负距离最小 距离最大 的节点Z
             tableint curNodeNum = curr_el_pair.second;
 
             std::unique_lock <std::mutex> lock(link_list_locks_[curNodeNum]);
 
+            // 取节点Z在当前层的邻居列表
             int *data;  // = (int *)(linkList0_ + curNodeNum * size_links_per_element0_);
             if (layer == 0) {
                 data = (int*)get_linklist0(curNodeNum);
@@ -270,6 +372,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             _mm_prefetch(getDataByInternalId(*(datal + 1)), _MM_HINT_T0);
 #endif
 
+            // 遍历节点Z的邻居
             for (size_t j = 0; j < size; j++) {
                 tableint candidate_id = *(datal + j);
 //                    if (candidate_id == 0) continue;
@@ -277,10 +380,12 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 _mm_prefetch((char *) (visited_array + *(datal + j + 1)), _MM_HINT_T0);
                 _mm_prefetch(getDataByInternalId(*(datal + j + 1)), _MM_HINT_T0);
 #endif
+                // 若已访问过则跳过，未访问过则标记访问
                 if (visited_array[candidate_id] == visited_array_tag) continue;
                 visited_array[candidate_id] = visited_array_tag;
                 char *currObj1 = (getDataByInternalId(candidate_id));
 
+                // 计算其与更新节点X的距离，若小于距离下限，或者 top集合未满，则加入候选集合
                 dist_t dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_);
                 if (top_candidates.size() < ef_construction_ || lowerBound > dist1) {
                     candidateSet.emplace(-dist1, candidate_id);
@@ -288,12 +393,15 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     _mm_prefetch(getDataByInternalId(candidateSet.top().second), _MM_HINT_T0);
 #endif
 
+                    // 同时 若没被删除 也添加进top集合
                     if (!isMarkedDeleted(candidate_id))
                         top_candidates.emplace(dist1, candidate_id);
 
+                    // 若top集合抵达上限则剔除距离最大的元素
                     if (top_candidates.size() > ef_construction_)
                         top_candidates.pop();
 
+                    // 使用top集合中最大的距离作为距离限制
                     if (!top_candidates.empty())
                         lowerBound = top_candidates.top().first;
                 }
@@ -440,13 +548,35 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
 
+    /**
+     * @brief 用启发式方法来从候选中选出邻居
+     * 
+     * @param top_candidates 候选集
+     * @param M 最终选定的邻居数量
+     * @desc 候选集中的元素是按照距离X点的距离排序的，在入参的优先队列中，距离最大的在堆顶
+     *       选取的逻辑是先选中一个最近的点，然后分别以各自为圆心，以两者间的距离为半径画圆，两个圆形内的点不会再被选中，然后再去检查其他选中点
+     * @note 对已选中的点进行遍历时，可以从其中最大值开始，剪枝掉距离小于最大值一半的点
+     * @note ps：这里按照负距离遍历，可以在堆中弹出到数组中，放到新的优先队列会有额外开销
+     *       
+     */
+    inline void getNeighborsByHeuristic(
+        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
+        const size_t M) {
+#ifdef HNSW_OPT
+        getNeighborsByHeuristic3(top_candidates, M);
+#else
+        getNeighborsByHeuristic2(top_candidates, M);
+#endif
+    }
     void getNeighborsByHeuristic2(
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
         const size_t M) {
+        // 候选集不多时，直接返回
         if (top_candidates.size() < M) {
             return;
         }
 
+        // 用负距离来构建堆，堆顶为最大值，由于负距离，则堆顶元素为距离最近的元素
         std::priority_queue<std::pair<dist_t, tableint>> queue_closest;
         std::vector<std::pair<dist_t, tableint>> return_list;
         while (top_candidates.size() > 0) {
@@ -454,19 +584,23 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             top_candidates.pop();
         }
 
+        // 依次从从堆中取出距离最近的点，保存满足条件的点
         while (queue_closest.size()) {
             if (return_list.size() >= M)
                 break;
+            // 取当前点的距离值
             std::pair<dist_t, tableint> curent_pair = queue_closest.top();
             dist_t dist_to_query = -curent_pair.first;
             queue_closest.pop();
             bool good = true;
 
+            // 从所有已选中的点中，计算当前点与已选点的距离， 若与已选点的距离值近，则认为该点与已选点重复，不选取
             for (std::pair<dist_t, tableint> second_pair : return_list) {
                 dist_t curdist =
                         fstdistfunc_(getDataByInternalId(second_pair.second),
                                         getDataByInternalId(curent_pair.second),
                                         dist_func_param_);
+                // 与已选中的点距离太近（若当前点与已选中的点距离小于查询点与已选中的点距离)，则不选取
                 if (curdist < dist_to_query) {
                     good = false;
                     break;
@@ -477,32 +611,126 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
         }
 
+        // 重新生成候选点列表
         for (std::pair<dist_t, tableint> curent_pair : return_list) {
             top_candidates.emplace(-curent_pair.first, curent_pair.second);
         }
     }
 
+    void getNeighborsByHeuristic3(
+        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
+        const size_t M) {
+        // 候选集不多时，直接返回
+        if (top_candidates.size() < M) {
+            return;
+        }
 
+        // 用负距离来构建堆，堆顶为最大值，由于负距离，则堆顶元素为距离最近的元素
+        std::vector<std::pair<dist_t, tableint>> queue_closest;
+        std::vector<std::pair<dist_t, tableint>> return_list;
+        while (top_candidates.size() > 0) {
+            queue_closest.emplace_back(std::move(top_candidates.top()));
+            top_candidates.pop();
+        }
+
+        // 依次从从堆中取出距离最近的点，保存满足条件的点
+        for (auto it = queue_closest.rbegin(); it != queue_closest.rend(); ++it) {
+            if (return_list.size() >= M)
+                break;
+            // 取当前点的距离值
+            std::pair<dist_t, tableint>& curent_pair = *it;
+            dist_t dist_to_query = curent_pair.first;
+            bool good = true;
+            dist_t result_max_dis = 0;
+
+            // 从所有已选中的点中，计算当前点与已选点的距离， 若与已选点的距离值近，则认为该点与已选点重复，不选取
+            for (auto ret_it = return_list.rbegin(); ret_it != return_list.rend(); ++ret_it) {
+                if (return_list.size() > 0 && ret_it->first * 2 < result_max_dis) {
+                    break;
+                }
+                dist_t curdist =
+                        fstdistfunc_(getDataByInternalId(ret_it->second),
+                                        getDataByInternalId(curent_pair.second),
+                                        dist_func_param_);
+                // 与已选中的点距离太近（若当前点与已选中的点距离小于查询点与已选中的点距离)，则不选取
+                if (curdist < dist_to_query) {
+                    good = false;
+                    break;
+                }
+            }
+            if (good) {
+                result_max_dis = curent_pair.first;
+                return_list.emplace_back(std::move(curent_pair));
+            }
+        }
+
+        // 重新生成候选点列表
+        for (std::pair<dist_t, tableint> curent_pair : return_list) {
+            top_candidates.emplace(std::move(curent_pair));
+        }
+    }
+
+    /**
+     * @brief 获取0层（大世界）中，指定内部id的邻居列表地址
+     * 
+     * @param internal_id 指定内部id
+     * @return linklistsizeint* 
+     * @note 由get_linklist_at_level封装
+     */
     linklistsizeint *get_linklist0(tableint internal_id) const {
         return (linklistsizeint *) (data_level0_memory_ + internal_id * size_data_per_element_ + offsetLevel0_);
     }
 
 
+    /**
+     * @brief 获取0层（大世界）中，指定内部id的邻居列表地址（指定0层内存地址）
+     * 
+     * @param internal_id 指定内部id
+     * @param data_level0_memory_ 指定的0层内存
+     * @return linklistsizeint* 
+     * @note 由get_linklist_at_level封装
+     */
     linklistsizeint *get_linklist0(tableint internal_id, char *data_level0_memory_) const {
         return (linklistsizeint *) (data_level0_memory_ + internal_id * size_data_per_element_ + offsetLevel0_);
     }
 
 
+    /**
+     * @brief 获取指定层（非0层，小世界）中，指定内部id的邻居列表地址
+     * 
+     * @param internal_id 指定内部id
+     * @param level 指定层级
+     * @return linklistsizeint* 
+     * @note 由get_linklist_at_level封装
+     */
     linklistsizeint *get_linklist(tableint internal_id, int level) const {
+        // level 应从1开始增加，-1为了换算到下标为0取对应地址
         return (linklistsizeint *) (linkLists_[internal_id] + (level - 1) * size_links_per_element_);
     }
 
 
+    /**
+     * @brief 获取指定层（任意）中，指定内部id的邻居列表地址
+     * 
+     * @param internal_id 指定内部id
+     * @param level 指定层级
+     * @return linklistsizeint* 
+     */
     linklistsizeint *get_linklist_at_level(tableint internal_id, int level) const {
         return level == 0 ? get_linklist0(internal_id) : get_linklist(internal_id, level);
     }
 
 
+    /**
+     * @brief 根据候选列表，在指定层上为新节点构建邻居
+     * 
+     * @param data_point 
+     * @param cur_c 
+     * @param top_candidates 
+     * @param level 
+     * @param isUpdate 
+     * @return tableint 
+     */
     tableint mutuallyConnectNewElement(
         const void *data_point,
         tableint cur_c,
@@ -510,10 +738,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         int level,
         bool isUpdate) {
         size_t Mcurmax = level ? maxM_ : maxM0_;
-        getNeighborsByHeuristic2(top_candidates, M_);
+        getNeighborsByHeuristic(top_candidates, M_);
         if (top_candidates.size() > M_)
             throw std::runtime_error("Should be not be more than M_ candidates returned by the heuristic");
 
+        // 从候选集依次取出所有节点，倒序排列
         std::vector<tableint> selectedNeighbors;
         selectedNeighbors.reserve(M_);
         while (top_candidates.size() > 0) {
@@ -600,7 +829,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                                                 dist_func_param_), data[j]);
                     }
 
-                    getNeighborsByHeuristic2(candidates, Mcurmax);
+                    getNeighborsByHeuristic(candidates, Mcurmax);
 
                     int indx = 0;
                     while (candidates.size() > 0) {
@@ -912,6 +1141,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     /*
     * Remove the deleted mark of the node.
     */
+    /**
+     * @brief 移除节点的删除标记，并从deleted_elements中删去
+     * 
+     * @param internalId 节点的内部id
+     */
     void unmarkDeletedInternal(tableint internalId) {
         assert(internalId < cur_element_count);
         if (isMarkedDeleted(internalId)) {
@@ -931,17 +1165,37 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     /*
     * Checks the first 16 bits of the memory to see if the element is marked deleted.
     */
+    /**
+     * @brief 检查节点是否被标记为删除
+     * 
+     * @param internalId 
+     * @return true 
+     * @return false 
+     * @note 会去零层的数据中取其邻居列表首项的前16位，判断是否被删除
+     */
     bool isMarkedDeleted(tableint internalId) const {
         unsigned char *ll_cur = ((unsigned char*)get_linklist0(internalId)) + 2;
         return *ll_cur & DELETE_MARK;
     }
 
 
+    /**
+     * @brief 获取邻居列表长度
+     * 
+     * @param ptr 邻居列表的地址
+     * @return unsigned short int 返回列表长度，零层和其他层的不同
+     */
     unsigned short int getListCount(linklistsizeint * ptr) const {
         return *((unsigned short int *)ptr);
     }
 
 
+    /**
+     * @brief 设置邻居列表长度
+     * 
+     * @param ptr 链表指针
+     * @param size 链表长度
+     */
     void setListCount(linklistsizeint * ptr, unsigned short int size) const {
         *((unsigned short int*)(ptr))=*((unsigned short int *)&size);
     }
@@ -951,17 +1205,30 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     * Adds point. Updates the point if it is already in the index.
     * If replacement of deleted elements is enabled: replaces previously deleted point if any, updating it with new point
     */
+
+
+    /**
+     * @brief 为索引内增加节点
+     * 
+     * @param data_point 节点向量
+     * @param label 节点标签
+     * @param replace_deleted 是否在已删除元素上进行替换
+     */
     void addPoint(const void *data_point, labeltype label, bool replace_deleted = false) {
+        // 若构建索引时禁止替换已删除元素，新增节点时不可替换
         if ((allow_replace_deleted_ == false) && (replace_deleted == true)) {
             throw std::runtime_error("Replacement of deleted elements is disabled in constructor");
         }
 
+        // 取标签对应的桶的锁
         // lock all operations with element by label
         std::unique_lock <std::mutex> lock_label(getLabelOpMutex(label));
+        // 不替换已删除元素，直接添加新节点
         if (!replace_deleted) {
             addPoint(data_point, label, -1);
             return;
         }
+        // 检查替换已删除元素时是否有可用的空位
         // check if there is vacant place
         tableint internal_id_replaced;
         std::unique_lock <std::mutex> lock_deleted_elements(deleted_elements_lock);
@@ -975,58 +1242,79 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         // if there is no vacant place then add or update point
         // else add point to vacant place
         if (!is_vacant_place) {
+            // 没有空位，直接添加新节点
             addPoint(data_point, label, -1);
         } else {
+            // 取得被替换的节点的标签 并将新标签写入空位
             // we assume that there are no concurrent operations on deleted element
             labeltype label_replaced = getExternalLabel(internal_id_replaced);
             setExternalLabel(internal_id_replaced, label);
 
+            // 移除被替换节点到内部ID的映射关系 并添加新标签到内部ID的映射关系
             std::unique_lock <std::mutex> lock_table(label_lookup_lock);
             label_lookup_.erase(label_replaced);
             label_lookup_[label] = internal_id_replaced;
             lock_table.unlock();
 
+            // 取消节点的删除标记 并将新节点数据更新进去
             unmarkDeletedInternal(internal_id_replaced);
             updatePoint(data_point, internal_id_replaced, 1.0);
         }
     }
 
 
+    /**
+     * @brief 更新指定内部id的节点向量
+     * 
+     * @param dataPoint 向量数据
+     * @param internalId 指定内部节点
+     * @param updateNeighborProbability 更新邻居的概率
+     */
     void updatePoint(const void *dataPoint, tableint internalId, float updateNeighborProbability) {
         // update the feature vector associated with existing point with new vector
+        // 拷贝对应数据到内部id对应的位置
         memcpy(getDataByInternalId(internalId), dataPoint, data_size_);
 
         int maxLevelCopy = maxlevel_;
         tableint entryPointCopy = enterpoint_node_;
         // If point to be updated is entry point and graph just contains single element then just return.
+        // 如果是索引入口点且索引中只有1个元素，则不需要后续操作
         if (entryPointCopy == internalId && cur_element_count == 1)
             return;
 
+        // 获取节点等级，遍历新节点的每个层级，为其更新邻居
         int elemLevel = element_levels_[internalId];
         std::uniform_real_distribution<float> distribution(0.0, 1.0);
         for (int layer = 0; layer <= elemLevel; layer++) {
+            // 保存自己和所有一跳二跳邻居
             std::unordered_set<tableint> sCand;
+            // 保存一跳邻居
             std::unordered_set<tableint> sNeigh;
+            // 获取当前层中所有一跳邻居
             std::vector<tableint> listOneHop = getConnectionsWithLock(internalId, layer);
             if (listOneHop.size() == 0)
                 continue;
 
             sCand.insert(internalId);
 
+            // 获取原来节点的所有一条邻居和一跳二跳邻居
             for (auto&& elOneHop : listOneHop) {
                 sCand.insert(elOneHop);
 
+                // 邻居更新概率，目前恒为1，不会进这里的逻辑
                 if (distribution(update_probability_generator_) > updateNeighborProbability)
                     continue;
 
                 sNeigh.insert(elOneHop);
 
+                // 获取当前层中所有二跳邻居 添加进sCand
                 std::vector<tableint> listTwoHop = getConnectionsWithLock(elOneHop, layer);
                 for (auto&& elTwoHop : listTwoHop) {
                     sCand.insert(elTwoHop);
                 }
             }
 
+            // 遍历所有一跳邻居，为其重新生成邻居（由于原节点被删除，所以其一跳邻居需要重新生成自己的邻居）
             for (auto&& neigh : sNeigh) {
                 // if (neigh == internalId)
                 //     continue;
@@ -1034,6 +1322,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidates;
                 size_t size = sCand.find(neigh) == sCand.end() ? sCand.size() : sCand.size() - 1;  // sCand guaranteed to have size >= 1
                 size_t elementsToKeep = std::min(ef_construction_, size);
+                // 遍历所有受影响的节点（原节点的一跳二跳邻居），计算当前节点和受影响节点之间的距离，取出最小的若干个节点
                 for (auto&& cand : sCand) {
                     if (cand == neigh)
                         continue;
@@ -1050,8 +1339,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 }
 
                 // Retrieve neighbours using heuristic and set connections.
-                getNeighborsByHeuristic2(candidates, layer == 0 ? maxM0_ : maxM_);
+                // 使用启发式搜索来从候选集中确定邻居（这里0层，大世界，使用双倍的连接数）
+                getNeighborsByHeuristic(candidates, layer == 0 ? maxM0_ : maxM_);
 
+                // 取得当前这个邻居的邻居列表位置，把新生成的邻居写入其中
                 {
                     std::unique_lock <std::mutex> lock(link_list_locks_[neigh]);
                     linklistsizeint *ll_cur;
@@ -1077,9 +1368,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         tableint dataPointInternalId,
         int dataPointLevel,
         int maxLevel) {
+        // 取入口节点作为搜索起点的目标节点Y，要找距离更新节点X最近的节点
         tableint currObj = entryPointInternalId;
         if (dataPointLevel < maxLevel) {
             dist_t curdist = fstdistfunc_(dataPoint, getDataByInternalId(currObj), dist_func_param_);
+            // 从更新节点X所触及的最高层开始，依次遍历X的所有层级
             for (int level = maxLevel; level > dataPointLevel; level--) {
                 bool changed = true;
                 while (changed) {
@@ -1092,11 +1385,13 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 #ifdef USE_SSE
                     _mm_prefetch(getDataByInternalId(*datal), _MM_HINT_T0);
 #endif
+                    // 遍历节点Y的所有邻居节点
                     for (int i = 0; i < size; i++) {
 #ifdef USE_SSE
                         _mm_prefetch(getDataByInternalId(*(datal + i + 1)), _MM_HINT_T0);
 #endif
                         tableint cand = datal[i];
+                        // 取所有邻居中距离X最近的点作为新的目标节点Y，并进入下一层搜索
                         dist_t d = fstdistfunc_(dataPoint, getDataByInternalId(cand), dist_func_param_);
                         if (d < curdist) {
                             curdist = d;
@@ -1111,7 +1406,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         if (dataPointLevel > maxLevel)
             throw std::runtime_error("Level of item to be updated cannot be bigger than max level");
 
+        // 从更新节点X所触及的最高层开始，依次遍历X的所有层级
         for (int level = dataPointLevel; level >= 0; level--) {
+            //从指定点开始进行搜索，返回当前层中距离X最近的K个点及其距离
             std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> topCandidates = searchBaseLayer(
                     currObj, dataPoint, level);
 
@@ -1139,6 +1436,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
 
+    /**
+     * @brief 获取指定内部节点和指定层级的邻居列表 返回列表的拷贝
+     * 
+     * @param internalId 节点内部ID
+     * @param level 节点等级
+     * @return std::vector<tableint> 返回节点的邻居列表
+     * @note 返回拷贝，可以返回引用优化
+     */
     std::vector<tableint> getConnectionsWithLock(tableint internalId, int level) {
         std::unique_lock <std::mutex> lock(link_list_locks_[internalId]);
         unsigned int *data = get_linklist_at_level(internalId, level);
@@ -1150,6 +1455,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     }
 
 
+    /**
+     * @brief 添加节点内部逻辑
+     * 
+     * @param data_point 节点向量
+     * @param label 节点标签
+     * @param level 节点等级
+     * @return tableint 返回节点内部ID
+     */
     tableint addPoint(const void *data_point, labeltype label, int level) {
         tableint cur_c = 0;
         {
@@ -1157,6 +1470,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             // if so, updating it *instead* of creating a new element.
             std::unique_lock <std::mutex> lock_table(label_lookup_lock);
             auto search = label_lookup_.find(label);
+            // 先判断下标签是否已经存在，已经存在则进行更新
             if (search != label_lookup_.end()) {
                 tableint existingInternalId = search->second;
                 if (allow_replace_deleted_) {
@@ -1166,6 +1480,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 }
                 lock_table.unlock();
 
+                // 若已经存在或者标记删除，则使用更新操作来更新节点即可
                 if (isMarkedDeleted(existingInternalId)) {
                     unmarkDeletedInternal(existingInternalId);
                 }
@@ -1178,11 +1493,13 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 throw std::runtime_error("The number of elements exceeds the specified limit");
             }
 
+            // 若不存在，则在lookup表中记录label到内部id的映射
             cur_c = cur_element_count;
             cur_element_count++;
             label_lookup_[label] = cur_c;
         }
 
+        // 为当前节点计算随机的层数并记录
         std::unique_lock <std::mutex> lock_el(link_list_locks_[cur_c]);
         int curlevel = getRandomLevel(mult_);
         if (level > 0)
@@ -1197,12 +1514,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         tableint currObj = enterpoint_node_;
         tableint enterpoint_copy = enterpoint_node_;
 
+        // 清理新节点在零层的空间， 并把label和data拷贝进去，这里是可以只清理邻居列表吧，其他的数据后面就直接覆盖了
         memset(data_level0_memory_ + cur_c * size_data_per_element_ + offsetLevel0_, 0, size_data_per_element_);
 
         // Initialisation of the data and label
         memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
         memcpy(getDataByInternalId(cur_c), data_point, data_size_);
 
+        // 非零层的节点额外初始化其高层邻居列表
         if (curlevel) {
             linkLists_[cur_c] = (char *) malloc(size_links_per_element_ * curlevel + 1);
             if (linkLists_[cur_c] == nullptr)
@@ -1210,9 +1529,11 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             memset(linkLists_[cur_c], 0, size_links_per_element_ * curlevel + 1);
         }
 
+        // currObj不为-1 表示索引中已经存在其他节点
         if ((signed)currObj != -1) {
             if (curlevel < maxlevelcopy) {
                 dist_t curdist = fstdistfunc_(data_point, getDataByInternalId(currObj), dist_func_param_);
+                // 遍历所有高于当前节点的层级，找到距离新节点X最近的节点
                 for (int level = maxlevelcopy; level > curlevel; level--) {
                     bool changed = true;
                     while (changed) {
@@ -1239,12 +1560,15 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
 
             bool epDeleted = isMarkedDeleted(enterpoint_copy);
+            // 从当前节点所在的最高层开始遍历
             for (int level = std::min(curlevel, maxlevelcopy); level >= 0; level--) {
                 if (level > maxlevelcopy || level < 0)  // possible?
                     throw std::runtime_error("Level error");
 
+                // 在当前层取距离新节点最近的k个节点
                 std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates = searchBaseLayer(
                         currObj, data_point, level);
+                // 如果入口节点被标记删除，则候选中要补充入口节点进来
                 if (epDeleted) {
                     top_candidates.emplace(fstdistfunc_(data_point, getDataByInternalId(enterpoint_copy), dist_func_param_), enterpoint_copy);
                     if (top_candidates.size() > ef_construction_)
@@ -1254,11 +1578,13 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             }
         } else {
             // Do nothing for the first element
+            // 索引添加中第一个节点时 只更新入口节点和最高层级
             enterpoint_node_ = 0;
             maxlevel_ = curlevel;
         }
 
         // Releasing lock for the maximum level
+        // 若当前节点的层级大于最大层级 则更新最大层级和入口节点
         if (curlevel > maxlevelcopy) {
             enterpoint_node_ = cur_c;
             maxlevel_ = curlevel;

@@ -6,6 +6,10 @@ project(hnswlib
 include(GNUInstallDirs)
 include(CheckCXXCompilerFlag)
 
+# 启用CTest
+include(CTest)
+enable_testing()
+
 add_library(hnswlib INTERFACE)
 add_library(hnswlib::hnswlib ALIAS hnswlib)
 
@@ -102,4 +106,14 @@ if(HNSWLIB_EXAMPLES)
 
     add_executable(main tests/cpp/main.cpp tests/cpp/sift_1b.cpp)
     target_link_libraries(main hnswlib)
+    
+    # 注册测试到CTest
+    add_test(NAME multivector_search_test COMMAND multivector_search_test)
+    add_test(NAME epsilon_search_test COMMAND epsilon_search_test)
+    add_test(NAME test_updates COMMAND test_updates)
+    add_test(NAME searchKnnCloserFirst_test COMMAND searchKnnCloserFirst_test)
+    add_test(NAME searchKnnWithFilter_test COMMAND searchKnnWithFilter_test)
+    add_test(NAME multiThreadLoad_test COMMAND multiThreadLoad_test)
+    add_test(NAME multiThread_replace_test COMMAND multiThread_replace_test)
+    add_test(NAME main COMMAND main)
 endif()

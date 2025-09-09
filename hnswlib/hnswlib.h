@@ -125,12 +125,21 @@ namespace hnswlib {
 typedef size_t labeltype;
 
 // This can be extended to store state for filtering (e.g. from a std::set)
+/**
+ * @brief 定义过滤器函数接口类
+ * 
+ */
 class BaseFilterFunctor {
  public:
     virtual bool operator()(hnswlib::labeltype id) { return true; }
     virtual ~BaseFilterFunctor() {};
 };
 
+/**
+ * @brief 定义搜索的停止条件？
+ * 
+ * @tparam dist_t 距离类型
+ */
 template<typename dist_t>
 class BaseSearchStopCondition {
  public:
@@ -149,6 +158,11 @@ class BaseSearchStopCondition {
     virtual ~BaseSearchStopCondition() {}
 };
 
+/**
+ * @brief 定义数据对的比较函数
+ * 
+ * @tparam T 
+ */
 template <typename T>
 class pairGreater {
  public:
@@ -167,9 +181,20 @@ static void readBinaryPOD(std::istream &in, T &podRef) {
     in.read((char *) &podRef, sizeof(T));
 }
 
+/**
+ * @brief 定义向量距离计算函数类型
+ * 
+ * @tparam MTYPE 距离的数据类型
+ */
 template<typename MTYPE>
 using DISTFUNC = MTYPE(*)(const void *, const void *, const void *);
 
+/**
+ * @brief 向量距离计算接口类，定义了向量之间的距离计算方法
+ * 
+ * @tparam MTYPE 距离的数据类型
+ * @note 支持L2距离计算和IP距离计算
+ */
 template<typename MTYPE>
 class SpaceInterface {
  public:
@@ -183,18 +208,55 @@ class SpaceInterface {
     virtual ~SpaceInterface() {}
 };
 
+/**
+ * @brief 算法接口类，定义了算法的基本操作
+ * 
+ * @tparam dist_t 计算距离的数据类型
+ * @note 目前只有HierarchicalNSW算法实现
+ */
 template<typename dist_t>
 class AlgorithmInterface {
  public:
+    
+    /**
+     * @brief 为索引中添加一个数据点
+     * 
+     * @param datapoint 数据点指针，数据点的维度由SpaceInterface指定
+     * @param label 数据点标签
+     * @param replace_deleted 
+     */
     virtual void addPoint(const void *datapoint, labeltype label, bool replace_deleted = false) = 0;
 
+    /**
+     * @brief 搜索最近邻点
+     * 
+     * @param query_data 查询数据点指针
+     * @param k 需要搜索的最近邻数量
+     * @param isIdAllowed 
+     * @return std::priority_queue<std::pair<dist_t, labeltype>> 返回优先队列存储的搜索结果
+     * @note 该函数返回的优先队列中，first为距离，second为标签，最近的点在队列的x部
+     */
     virtual std::priority_queue<std::pair<dist_t, labeltype>>
-        searchKnn(const void*, size_t, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
+        searchKnn(const void* query_data, size_t k, BaseFilterFunctor* isIdAllowed = nullptr) const = 0;
 
     // Return k nearest neighbor in the order of closer fist
+    /** 
+     * @brief 搜索最近邻点
+     * 
+     * @param query_data 查询数据点指针
+     * @param k 需要搜索的最近邻数量
+     * @param isIdAllowed 
+     * @return std::vector<std::pair<dist_t, labeltype>> 返回数组存储的搜索结果
+     * @note 该函数返回的向量中，first为距离，second为标签，最近的点在队列的x部
+     */
     virtual std::vector<std::pair<dist_t, labeltype>>
         searchKnnCloserFirst(const void* query_data, size_t k, BaseFilterFunctor* isIdAllowed = nullptr) const;
 
+    /**
+     * @brief 保存当前索引data到文件
+     * 
+     * @param location 文件路径
+     */
     virtual void saveIndex(const std::string &location) = 0;
     virtual ~AlgorithmInterface(){
     }
