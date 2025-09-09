@@ -29,15 +29,8 @@ static void BM_HnswBuildDataSizeBench(benchmark::State& state) {
     state.SetComplexityN(state.range(0));
 }
 
-static void BM_StringCreation(benchmark::State& state) {
-    for (auto _ : state) {
-        std::string empty_string;
-        benchmark::DoNotOptimize(empty_string);
-    }
-}
 void RegisterHnswBenchmarks() {
-    BENCHMARK(BM_StringCreation);
     BENCHMARK(BM_HnswBuildDataSizeBench)
-        ->Range(8 << 6 /* 512 */, 8 << 15 /* 4096 */);
+        ->Range( 1 << 9 /* 512 */, 1 << 18 /* 262144 */);
 
 }

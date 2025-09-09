@@ -38,6 +38,10 @@ endif()
 if(HNSWLIB_EXAMPLES)
     set(CMAKE_CXX_STANDARD 11)
 
+    if(NOT CMAKE_BUILD_TYPE)
+      set(CMAKE_BUILD_TYPE Release)
+    endif()
+    
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       SET( CMAKE_CXX_FLAGS  "-Ofast -std=c++11 -DHAVE_CXX0X -openmp -fpic -ftree-vectorize" )
       check_cxx_compiler_flag("-march=native" COMPILER_SUPPORT_NATIVE_FLAG)
