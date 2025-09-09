@@ -38,6 +38,6 @@ static void BM_StringCreation(benchmark::State& state) {
 void RegisterHnswBenchmarks() {
     BENCHMARK(BM_StringCreation);
     BENCHMARK(BM_HnswBuildDataSizeBench)
-        ->Range(8 << 6 /* 512 */, 8 << 12 /* 4096 */);
+        ->Range(8 << 6 /* 512 */, 8 << 15 /* 4096 */);
 
 }

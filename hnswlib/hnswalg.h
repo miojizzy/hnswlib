@@ -559,65 +559,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
      * @note ps：这里按照负距离遍历，可以在堆中弹出到数组中，放到新的优先队列会有额外开销
      *       
      */
-    inline void getNeighborsByHeuristic(
-        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
-        const size_t M) {
-#ifdef HNSW_OPT
-        getNeighborsByHeuristic3(top_candidates, M);
-#else
-        getNeighborsByHeuristic2(top_candidates, M);
-#endif
-    }
-    void getNeighborsByHeuristic2(
-        std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
-        const size_t M) {
-        // 候选集不多时，直接返回
-        if (top_candidates.size() < M) {
-            return;
-        }
-
-        // 用负距离来构建堆，堆顶为最大值，由于负距离，则堆顶元素为距离最近的元素
-        std::priority_queue<std::pair<dist_t, tableint>> queue_closest;
-        std::vector<std::pair<dist_t, tableint>> return_list;
-        while (top_candidates.size() > 0) {
-            queue_closest.emplace(-top_candidates.top().first, top_candidates.top().second);
-            top_candidates.pop();
-        }
-
-        // 依次从从堆中取出距离最近的点，保存满足条件的点
-        while (queue_closest.size()) {
-            if (return_list.size() >= M)
-                break;
-            // 取当前点的距离值
-            std::pair<dist_t, tableint> curent_pair = queue_closest.top();
-            dist_t dist_to_query = -curent_pair.first;
-            queue_closest.pop();
-            bool good = true;
-
-            // 从所有已选中的点中，计算当前点与已选点的距离， 若与已选点的距离值近，则认为该点与已选点重复，不选取
-            for (std::pair<dist_t, tableint> second_pair : return_list) {
-                dist_t curdist =
-                        fstdistfunc_(getDataByInternalId(second_pair.second),
-                                        getDataByInternalId(curent_pair.second),
-                                        dist_func_param_);
-                // 与已选中的点距离太近（若当前点与已选中的点距离小于查询点与已选中的点距离)，则不选取
-                if (curdist < dist_to_query) {
-                    good = false;
-                    break;
-                }
-            }
-            if (good) {
-                return_list.push_back(curent_pair);
-            }
-        }
-
-        // 重新生成候选点列表
-        for (std::pair<dist_t, tableint> curent_pair : return_list) {
-            top_candidates.emplace(-curent_pair.first, curent_pair.second);
-        }
-    }
-
-    void getNeighborsByHeuristic3(
+    void getNeighborsByHeuristic(
         std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
         const size_t M) {
         // 候选集不多时，直接返回
